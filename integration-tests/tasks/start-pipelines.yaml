@@ -9,7 +9,7 @@ metadata:
     tekton.dev/tags: "pipeline,start,rhtap"
 spec:
   description: >-
-    This task starts one or more rhtap-cli-e2e pipelines based on configuration.
+    This task starts one or more tssc-cli-e2e pipelines based on configuration.
     It supports both single configuration mode and periodic configuration mode
     (multiple configs with separators and testplans).
   params:
@@ -88,13 +88,13 @@ spec:
         echo "Starting pipelines in mode: $MODE"
         echo "Using Konflux metadata: namespace=$KONFLUX_NAMESPACE, app=$KONFLUX_APPLICATION_NAME, component=$KONFLUX_COMPONENT_NAME"
         # Extract images from snapshot
-        tssc_image=$(echo "${SNAPSHOT}" | jq -r '.components[] |select(.name=="rhtap-cli").containerImage')
+        tssc_image=$(echo "${SNAPSHOT}" | jq -r '.components[] |select(.name=="tssc-cli").containerImage')
         tssc_test_image=$(echo "${SNAPSHOT}" | jq -r '.components[] |select(.name=="tssc-test").containerImage')
 
         GIT_REPO="$(jq -r '.git.repo // empty' <<< $JOB_SPEC)"
         KONFLUX_URL="https://konflux-ui.apps.stone-prd-rh01.pg1f.p1.openshiftapps.com"
 
-        if [[ "${GIT_REPO}" = "rhtap-cli" ]]; then
+        if [[ "${GIT_REPO}" = "tssc-cli" ]]; then
           REPO_ORG=$(jq -r '.git.source_repo_org' <<< $JOB_SPEC)
           BRANCH=$(jq -r '.git.source_repo_branch' <<< $JOB_SPEC)
         else
@@ -142,8 +142,8 @@ spec:
             "-o" "name"
           )
           echo "Starting pipeline with testplan (${#testplan_b64} chars): ${testplan_b64:0:50}..."
-          pipeline_run=$(tkn pipeline start -f https://raw.githubusercontent.com/jkopriva/rhtap-cli/refs/heads/RHTAP-5290/integration-tests/pipelines/rhtap-cli-e2e.yaml "${tkn_params[@]}")
-          #pipeline_run=$(tkn pipeline start -f https://raw.githubusercontent.com/$REPO_ORG/rhtap-cli/refs/heads/$BRANCH/integration-tests/pipelines/rhtap-cli-e2e.yaml "${tkn_params[@]}")
+          pipeline_run=$(tkn pipeline start -f https://raw.githubusercontent.com/jkopriva/tssc-cli/refs/heads/RHTAP-5290/integration-tests/pipelines/tssc-cli-e2e.yaml "${tkn_params[@]}")
+          #pipeline_run=$(tkn pipeline start -f https://raw.githubusercontent.com/$REPO_ORG/tssc-cli/refs/heads/$BRANCH/integration-tests/pipelines/tssc-cli-e2e.yaml "${tkn_params[@]}")
           echo "Started new pipelinerun: ${KONFLUX_URL}/ns/${KONFLUX_NAMESPACE}/applications/${KONFLUX_APPLICATION_NAME}/pipelineruns/${pipeline_run}"
           PIPELINERUNS_ARRAY+=($pipeline_run)
         }
