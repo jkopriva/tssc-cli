@@ -58,7 +58,6 @@ spec:
           value: $(params.rhads-config)
         - name: MODE
           value: $(params.mode)
-
         - name: CONTEXT_PIPELINE_RUN_NAME
           value: $(params.context-pipeline-run-name)
         - name: KONFLUX_TEST_INFRA_SECRET
