@@ -33,6 +33,7 @@ spec:
   workspaces:
     - name: shared-workspace
       description: "Workspace for sharing files between tasks"
+      emptyDir: {}
   tasks:
     - name: test-metadata
       taskRef:
