@@ -30,9 +30,6 @@ spec:
       description: 'The number of replicas for the cluster nodes.'
       default: "3"
       type: string
-  workspaces:
-    - name: shared-workspace
-      description: "Workspace for sharing files between tasks"
   tasks:
     - name: test-metadata
       taskRef:
