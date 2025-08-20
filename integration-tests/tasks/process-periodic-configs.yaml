@@ -39,7 +39,6 @@ spec:
         cd /workspace
         curl -o periodic.pict https://raw.githubusercontent.com/jkopriva/tssc-cli/refs/heads/RHTAP-5290/integration-tests/config/periodic/periodic.pict
         cat periodic.pict
-
     - name: generate-pict-output
       image: quay.io/apodhrad/pict:latest
       volumeMounts:
@@ -52,7 +51,6 @@ spec:
         cd /workspace
         pict periodic.pict -r -o:1 > pict_output.txt
         cat pict_output.txt
-
     - name: process-config
       image: quay.io/konflux-ci/appstudio-utils:ab6b0b8e40e440158e7288c73aff1cf83a2cc8a9@sha256:24179f0efd06c65d16868c2d7eb82573cce8e43533de6cea14fec3b7446e0b14
       volumeMounts:
@@ -123,3 +121,6 @@ spec:
         cat "$OUTPUT_FILE"
         cat "$OUTPUT_FILE" > "$(results.rhads-config.path)"
         echo "Configuration processing completed successfully"
+    volumes:
+      - name: shared-workspace
+        emptyDir: {}
