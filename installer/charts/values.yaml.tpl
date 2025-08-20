@@ -1,17 +1,19 @@
 {{- $crc := required "CRC settings" .Installer.Settings.crc -}}
-{{- $tas := required "TAS settings" .Installer.Products.trustedArtifactSigner -}}
-{{- $tpa := required "TPA settings" .Installer.Products.trustedProfileAnalyzer -}}
-{{- $keycloak := required "Keycloak settings" .Installer.Products.keycloak -}}
-{{- $acs := required "Red Hat ACS settings" .Installer.Products.advancedClusterSecurity -}}
-{{- $gitops := required "GitOps settings" .Installer.Products.openShiftGitOps -}}
-{{- $pipelines := required "Pipelines settings" .Installer.Products.openShiftPipelines -}}
-{{- $rhdh := required "RHDH settings" .Installer.Products.developerHub -}}
+{{- $tas := required "TAS settings" .Installer.Products.Trusted_Artifact_Signer -}}
+{{- $tpa := required "TPA settings" .Installer.Products.Trusted_Profile_Analyzer -}}
+{{- $acs := required "Red Hat ACS settings" .Installer.Products.Advanced_Cluster_Security -}}
+{{- $gitops := required "GitOps settings" .Installer.Products.OpenShift_GitOps -}}
+{{- $pipelines := required "Pipelines settings" .Installer.Products.OpenShift_Pipelines -}}
+{{- $pipelinesNamespace := "openshift-pipelines" -}}
+{{- $rhdh := required "RHDH settings" .Installer.Products.Developer_Hub -}}
 {{- $ingressDomain := required "OpenShift ingress domain" .OpenShift.Ingress.Domain -}}
 {{- $ingressRouterCA := required "OpenShift RouterCA" .OpenShift.Ingress.RouterCA -}}
 {{- $openshiftMinorVersion := required "OpenShift Version" .OpenShift.MinorVersion -}}
+{{- $keycloakEnabled := or $tpa.Enabled $tas.Enabled }}
+{{- $keycloakNamespace := "tssc-keycloak" -}}
 ---
 debug:
-  ci: {{ dig "ci" "debug" false .Installer.Settings -}}
+  ci: {{ dig "ci" "debug" false .Installer.Settings }}
 
 #
 # tssc-openshift
@@ -19,16 +21,20 @@ debug:
 
 openshift:
   projects:
-{{- if $keycloak.Enabled }}
-    - {{ $keycloak.Namespace }}
-    {{- if $gitops.Properties.manageSubscription }}
+{{- if $keycloakEnabled }}
+    - {{ $keycloakNamespace }}
     - rhbk-operator
-    {{- end }}
 {{- end }}
 {{- if $acs.Enabled }}
     - {{ $acs.Namespace }}
     {{- if $acs.Properties.manageSubscription }}
     - rhacs-operator
+    {{- end }}
+{{- end }}
+{{- if $tpa.Enabled }}
+    - {{ $tpa.Namespace }}
+    {{- if $tpa.Properties.manageSubscription }}
+    - rhtpa-operator
     {{- end }}
 {{- end }}
 {{- if $gitops.Enabled }}
@@ -50,26 +56,26 @@ openshift:
 
 
 subscriptions:
-  crunchyData:
-    enabled: {{ or $tpa.Enabled $rhdh.Enabled }}
-    managed: {{ or (and $tpa.Enabled $tpa.Properties.manageSubscription ) (and $rhdh.Enabled $rhdh.Properties.manageSubscription) }}
   openshiftGitOps:
     enabled: {{ $gitops.Enabled }}
     managed: {{ and $gitops.Enabled $gitops.Properties.manageSubscription }}
     config:
       argoCDClusterNamespace: {{ $gitops.Namespace }}
   openshiftKeycloak:
-    enabled: {{ $keycloak.Enabled }}
-    managed: {{ and $keycloak.Enabled $keycloak.Properties.manageSubscription }}
+    enabled: {{ $keycloakEnabled }}
+    managed: {{ $keycloakEnabled }}
     operatorGroup:
       targetNamespaces:
-        - {{ default "empty" $keycloak.Namespace }}
+        - {{ default "empty" $keycloakNamespace }}
   openshiftPipelines:
     enabled: {{ $pipelines.Enabled }}
     managed: {{ and $pipelines.Enabled $pipelines.Properties.manageSubscription }}
   openshiftTrustedArtifactSigner:
     enabled: {{ $tas.Enabled }}
     managed: {{ and $tas.Enabled $tas.Properties.manageSubscription }}
+  trustedProfileAnalyzer:
+    enabled: {{ $tpa.Enabled }}
+    managed: {{ and $tpa.Enabled $tpa.Properties.manageSubscription }}
   advancedClusterSecurity:
     enabled: {{ $acs.Enabled }}
     managed: {{ and $acs.Enabled $acs.Properties.manageSubscription }}
@@ -84,16 +90,17 @@ subscriptions:
 infrastructure:
   developerHub:
     namespace: {{ $rhdh.Namespace }}
-  postgresClusters:
-    keycloak:
-      enabled: {{ $keycloak.Enabled }}
-      namespace: {{ $keycloak.Namespace }}
-    tpa:
-      enabled: {{ $tpa.Enabled }}
-      namespace: {{ $tpa.Namespace }}
+  pgsqlService:
+    instances:
+      - name: tpa
+        enabled: {{ $tpa.Enabled }}
+        namespace: {{ $tpa.Namespace }}
+      - name: keycloak
+        enabled: {{ $keycloakEnabled }}
+        namespace: {{ $keycloakNamespace }}
   openShiftPipelines:
     enabled: {{ $pipelines.Enabled }}
-    namespace: {{ $pipelines.Namespace }}
+    namespace: {{ $pipelinesNamespace }}
 
 #
 # tssc-backing-services
@@ -101,17 +108,16 @@ infrastructure:
 
 {{- $keycloakRouteTLSSecretName := "keycloak-tls" }}
 {{- $keycloakRouteHost := printf "sso.%s" $ingressDomain }}
-{{- $argoCDName := printf "%s-gitops" .Installer.Namespace }}
 
 backingServices:
   keycloak:
-    enabled: {{ $keycloak.Enabled }}
-    namespace: {{ $keycloak.Namespace }}
+    enabled: {{ $keycloakEnabled }}
+    namespace: {{ $keycloakNamespace }}
     instances: 1
     database:
-      host: keycloak-primary
+      host: keycloak-pgsql
       name: keycloak
-      secretName: keycloak-pguser-keycloak
+      secretName: keycloak-pgsql-user
     route:
       host: {{ $keycloakRouteHost }}
       tls:
@@ -125,13 +131,6 @@ backingServices:
     service:
       annotations:
         service.beta.openshift.io/serving-cert-secret-name: {{ $keycloakRouteTLSSecretName }}
-  argoCD:
-    enabled: {{ $gitops.Enabled }}
-    name: {{ $argoCDName }}
-    namespace: {{ $gitops.Namespace }}
-    integrationSecret:
-      namespace: {{ .Installer.Namespace }}
-    ingressDomain: {{ $ingressDomain }}
 
 #
 # tssc-acs
@@ -154,6 +153,9 @@ acsTest: *acs
 #
 # tssc-app-namespaces
 #
+
+{{- $argoCDName := printf "%s-gitops" .Installer.Namespace }}
+
 appNamespaces:
   argoCD:
     name: {{ $argoCDName }}
@@ -182,7 +184,7 @@ argoCD:
 #
 
 pipelines:
-  namespace: {{ $pipelines.Namespace }}
+  namespace: {{ $pipelinesNamespace }}
   tssc:
     namespace: {{ .Installer.Namespace }}
 
@@ -240,6 +242,7 @@ developerHub:
     adminUsers:
 {{ dig "Properties" "RBAC" "adminUsers" (list "${GITLAB__USERNAME}") $rhdh | toYaml | indent 6 }}
 {{- end }}
+
 #
 # tssc-tpa-realm
 #
@@ -255,10 +258,10 @@ developerHub:
 {{- $tpaOIDCIssuerURL := printf "%s://%s/%s" $protocol $keycloakRouteHost $tpaRealmPath }}
 
 trustedProfileAnalyzerRealm:
-  enabled: {{ $keycloak.Enabled }}
+  enabled: {{ $keycloakEnabled }}
   appDomain: "{{ $tpaAppDomain }}"
   keycloakCR:
-    namespace: {{ $keycloak.Namespace }}
+    namespace: {{ $keycloakNamespace }}
     name: keycloak
   oidcIssuerURL: {{ $tpaOIDCIssuerURL }}
   oidcClientsSecretName: {{ $tpaOIDCClientsSecretName }}
@@ -289,13 +292,12 @@ trustedProfileAnalyzerRealm:
 # tssc-tpa
 #
 
-{{- $tpaDatabaseSecretName := "tpa-pguser-tpa" }}
+{{- $tpaDatabaseSecretName := "tpa-pgsql-user" }}
 
 trustedProfileAnalyzer:
   enabled: {{ $tpa.Enabled }}
   oidcIssuerURL: {{ $tpaOIDCIssuerURL }}
-
-redhat-trusted-profile-analyzer:
+  namespace: "{{ $tpa.Namespace }}"
   appDomain: "{{ $tpaAppDomain }}"
   ingress: &tpaIngress
     className: openshift-default
@@ -359,6 +361,8 @@ redhat-trusted-profile-analyzer:
 {{- end }}
 
 trustification:
+  name: trustedprofileanalyzer
+  namespace: "{{ $tpa.Namespace }}"
   appDomain: "{{ $tpaAppDomain }}"
   openshift: *tpaOpenShift
   storage: *tpaStorage
@@ -377,9 +381,9 @@ trustedArtifactSigner:
   enabled: {{ $tas.Enabled }}
   ingressDomain: "{{ $ingressDomain }}"
   keycloakRealmImport:
-    enabled: {{ $keycloak.Enabled }}
+    enabled: {{ $keycloakEnabled }}
     keycloakCR:
-      namespace: {{ $keycloak.Namespace }}
+      namespace: {{ $keycloakNamespace }}
       name: keycloak
   secureSign:
     enabled: {{ $tas.Enabled }}

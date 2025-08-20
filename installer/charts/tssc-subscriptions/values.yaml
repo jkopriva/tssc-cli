@@ -1,21 +1,12 @@
 ---
 subscriptions:
-  crunchyData:
-    enabled: false
-    description: Crunchy-Data PostgreSQL Operator
-    apiResource: postgresclusters.postgres-operator.crunchydata.com
-    namespace: openshift-operators
-    name: crunchy-postgres-operator-rhmp
-    channel: v5
-    source: redhat-marketplace
-    sourceNamespace: openshift-marketplace
   openshiftGitOps:
     enabled: false
     description: OpenShift GitOps Operator
     apiResource: gitopsservices.pipelines.openshift.io
     namespace: openshift-operators
     name: openshift-gitops-operator
-    channel: gitops-1.16
+    channel: gitops-1.17
     source: redhat-operators
     sourceNamespace: openshift-marketplace
     config:
@@ -69,3 +60,16 @@ subscriptions:
     channel: fast-1.6
     source: redhat-operators
     sourceNamespace: openshift-marketplace
+  trustedProfileAnalyzer:
+    enabled: false
+    description: Red Hat Trusted Profile Analyzer
+    apiResource: trustedprofileanalyzers.rhtpa.io
+    namespace: tssc-tpa
+    name: rhtpa-operator
+    channel: stable
+    source: redhat-operators
+    sourceNamespace: openshift-marketplace
+    operatorGroup:
+      upgradeStrategy: Default
+      targetNamespaces:
+        - tssc-tpa

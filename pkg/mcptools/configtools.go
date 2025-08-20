@@ -23,8 +23,7 @@ type ConfigTools struct {
 	cm     *config.ConfigMapManager // cluster config manager
 	kube   *k8s.Kube                // kubernetes client
 
-	defaultDependencies config.Dependencies // default config dependencies
-	defaultCfg          *config.Config      // default config (embedded)
+	defaultCfg *config.Config // default config (embedded)
 }
 
 const (
@@ -98,9 +97,6 @@ func (c *ConfigTools) createHandler(
 	if settings, ok := ctr.GetArguments()[SettingsArg].(config.Settings); ok {
 		cfg.Installer.Settings = settings
 	}
-
-	// Making sure the dependencies are back in place.
-	cfg.Installer.Dependencies = c.defaultDependencies
 
 	// Ensure the configuration is valid.
 	if err := cfg.Validate(); err != nil {
@@ -191,14 +187,10 @@ func NewConfigTools(
 	}
 
 	c := &ConfigTools{
-		logger:              logger.With("component", "mcp-config-tools"),
-		kube:                kube,
-		cm:                  cm,
-		defaultDependencies: defaultCfg.Installer.Dependencies,
-		defaultCfg:          defaultCfg,
+		logger:     logger.With("component", "mcp-config-tools"),
+		kube:       kube,
+		cm:         cm,
+		defaultCfg: defaultCfg,
 	}
-	// Making sure the dependencies are hidden by design.
-	c.defaultCfg.Installer.Dependencies = []config.Dependency{}
-
 	return c, nil
 }
