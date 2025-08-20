@@ -30,6 +30,9 @@ spec:
       description: 'The number of replicas for the cluster nodes.'
       default: "3"
       type: string
+  workspaces:
+    - name: shared-workspace
+      description: "Workspace for sharing files between tasks"
   tasks:
     - name: test-metadata
       taskRef:
@@ -59,6 +62,9 @@ spec:
       params:
         - name: job-spec
           value: $(tasks.test-metadata.results.job-spec)
+      workspaces:
+        - name: shared-workspace
+          workspace: shared-workspace
       runAfter:
         - test-metadata
     - name: start-periodic-pipelines

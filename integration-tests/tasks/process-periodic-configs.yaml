@@ -15,6 +15,9 @@ spec:
     - name: job-spec
       description: "Job specification metadata"
       type: string
+  workspaces:
+    - name: shared-workspace
+      description: "Workspace for sharing files between steps"
   results:
     - name: rhads-config
       description: "JSON formatted configuration data (array of configs from PICT)"
@@ -24,31 +27,43 @@ spec:
       env:
         - name: JOB_SPEC
           value: $(params.job-spec)
+      volumeMounts:
+        - name: shared-workspace
+          mountPath: /workspace
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         echo "Using periodic configurations generated from PICT"
-        # Download periodic.pict file
+        # Download periodic.pict file to shared workspace
+        cd /workspace
         curl -o periodic.pict https://raw.githubusercontent.com/jkopriva/tssc-cli/refs/heads/RHTAP-5290/integration-tests/config/periodic/periodic.pict
         cat periodic.pict
 
     - name: generate-pict-output
       image: quay.io/apodhrad/pict:latest
+      volumeMounts:
+        - name: shared-workspace
+          mountPath: /workspace
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         echo "Running PICT to generate test configurations..."
+        cd /workspace
         pict periodic.pict -r -o:1 > pict_output.txt
         cat pict_output.txt
 
     - name: process-config
       image: quay.io/konflux-ci/appstudio-utils:ab6b0b8e40e440158e7288c73aff1cf83a2cc8a9@sha256:24179f0efd06c65d16868c2d7eb82573cce8e43533de6cea14fec3b7446e0b14
+      volumeMounts:
+        - name: shared-workspace
+          mountPath: /workspace
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         echo "Converting PICT output to RHADS configuration format..."
+        cd /workspace
         # Debug: Check if pict_output.txt exists and show its content
         if [[ ! -f pict_output.txt ]]; then
           echo "ERROR: pict_output.txt not found!"
@@ -69,7 +84,7 @@ spec:
         cat testplan_template.json
         # Convert PICT output to multiple RHADS configurations
         CONFIG_COUNT=0
-        OUTPUT_FILE="/tmp/rhads_output.txt"
+        OUTPUT_FILE="/workspace/rhads_output.txt"
         > "$OUTPUT_FILE"  # Initialize empty file
         while IFS=$'\t' read -r -a fields; do
           echo "Processing line: ${fields[*]}"
