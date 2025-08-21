@@ -62,6 +62,10 @@ spec:
         # Get the PICT output from the previous step
         cat $(results.pict-output.path) > pict_output.txt
         
+        # Set local variable for maximum configurations (0 = all configurations)
+        MAX_CONFIGS=2  # Change this value to limit configurations (e.g., 5, 10, etc.)
+        echo "Maximum configurations requested: $MAX_CONFIGS (0 = all configurations)"
+        
         # Debug: Check if pict_output.txt exists and show its content
         if [[ ! -f pict_output.txt ]]; then
           echo "ERROR: pict_output.txt not found!"
@@ -89,6 +93,12 @@ spec:
         while IFS=$'\t' read -r -a fields; do
           echo "Processing line: ${fields[*]}"
           if [[ "${fields[0]}" != "OCP" && -n "${fields[0]:-}" ]]; then  # Skip header line and empty lines
+            # Check if we've reached the maximum number of configurations
+            if [[ $MAX_CONFIGS -gt 0 && $CONFIG_COUNT -ge $MAX_CONFIGS ]]; then
+              echo "Reached maximum number of configurations ($MAX_CONFIGS), stopping processing"
+              break
+            fi
+            
             if [[ $CONFIG_COUNT -gt 0 ]]; then
               echo "---CONFIG_SEPARATOR---" >> "$OUTPUT_FILE"
             fi
@@ -118,6 +128,11 @@ spec:
           fi
         done < pict_output.txt
         echo "Generated $CONFIG_COUNT RHADS configurations with testplans"
+        if [[ $MAX_CONFIGS -gt 0 ]]; then
+          echo "Limited to $MAX_CONFIGS configurations as requested"
+        else
+          echo "No limit applied - processed all available configurations"
+        fi
         # Copy output to result path
         echo "Final output:"
         cat "$OUTPUT_FILE"
@@ -125,3 +140,5 @@ spec:
 
         echo "Encoding rhads-config to base64:"
         cat "$OUTPUT_FILE" | base64 -w 0 | tee $(results.rhads-config.path)
+        
+        echo "Configuration count: $CONFIG_COUNT"

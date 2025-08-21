@@ -30,6 +30,7 @@ spec:
       description: 'The number of replicas for the cluster nodes.'
       default: "3"
       type: string
+
   tasks:
     - name: test-metadata
       taskRef:
