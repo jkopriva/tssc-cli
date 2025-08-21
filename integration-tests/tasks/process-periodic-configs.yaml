@@ -63,7 +63,7 @@ spec:
         cat $(results.pict-output.path) > pict_output.txt
         
         # Set local variable for maximum configurations (0 = all configurations)
-        MAX_CONFIGS=2  # Change this value to limit configurations (e.g., 5, 10, etc.)
+        MAX_CONFIGS=1  # Change this value to limit configurations (e.g., 5, 10, etc.)
         echo "Maximum configurations requested: $MAX_CONFIGS (0 = all configurations)"
         
         # Debug: Check if pict_output.txt exists and show its content
