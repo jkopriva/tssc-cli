@@ -17,7 +17,7 @@ spec:
       type: string
   results:
     - name: rhads-config
-      description: "JSON formatted configuration data (array of configs from PICT)"
+      description: "JSON formatted configuration data (array of configs from PICT, base64 encoded)"
     - name: periodic-pict
       description: "Periodic PICT file content for sharing between steps"
     - name: pict-output
@@ -126,4 +126,8 @@ spec:
         echo "Configuration processing completed successfully"
         curl -o rhads-config https://raw.githubusercontent.com/redhat-appstudio/tssc-cli/refs/heads/main/integration-tests/config/rhads-config
 
-        cat rhads-config | tee $(results.rhads-config.path)
+        echo "Original rhads-config content:"
+        cat rhads-config
+        
+        echo "Encoding rhads-config to base64:"
+        cat rhads-config | base64 -w 0 | tee $(results.rhads-config.path)

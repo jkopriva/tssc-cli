@@ -20,7 +20,7 @@ spec:
       description: "Job specification metadata"
       type: string
     - name: rhads-config
-      description: "RHADS configuration data (single config or array of configs with separators)"
+      description: "RHADS configuration data (single config or array of configs with separators, base64 encoded)"
       type: string
     - name: mode
       description: "Pipeline mode: 'single' for single config, 'periodic' for multiple configs with separators"
@@ -43,6 +43,7 @@ spec:
     - name: context-pipeline-run-name
       description: "Context pipeline run name for labeling"
       type: string
+      default: ""
   results:
     - name: pipeline-runs
       description: "Array of started pipeline run names"
@@ -86,6 +87,13 @@ spec:
 
         echo "Starting pipelines in mode: $MODE"
         echo "Using Konflux metadata: namespace=$KONFLUX_NAMESPACE, app=$KONFLUX_APPLICATION_NAME, component=$KONFLUX_COMPONENT_NAME"
+        
+        # Decode base64 encoded rhads-config
+        echo "Decoding base64 encoded rhads-config..."
+        DECODED_RHADS_CONFIG=$(echo "$RHADS_CONFIG" | base64 -d)
+        echo "Decoded rhads-config content:"
+        echo "$DECODED_RHADS_CONFIG"
+        
         # Extract images from snapshot
         tssc_image=$(echo "${SNAPSHOT}" | jq -r '.components[] |select(.name=="tssc-cli").containerImage')
         tssc_test_image=$(echo "${SNAPSHOT}" | jq -r '.components[] |select(.name=="tssc-test").containerImage')
@@ -150,15 +158,15 @@ spec:
         if [[ "$MODE" == "periodic" ]]; then
           echo "Processing periodic configurations..."
           echo "RHADS Config data:"
-          echo "$RHADS_CONFIG"
+          echo "$DECODED_RHADS_CONFIG"
           # Count configurations for informational purposes
-          CONFIG_COUNT=$(echo "$RHADS_CONFIG" | grep -o -e "---CONFIG_SEPARATOR---" | wc -l)
+          CONFIG_COUNT=$(echo "$DECODED_RHADS_CONFIG" | grep -o -e "---CONFIG_SEPARATOR---" | wc -l)
           CONFIG_COUNT=$((CONFIG_COUNT + 1))  # Add 1 because there's one more config than separators
           echo "Found $CONFIG_COUNT configurations to process"
           # Create a pipeline for every RHADS config using pure bash string manipulation
           CONFIG_INDEX=0
           # Split the configurations using bash string manipulation
-          REMAINING_CONFIG="$RHADS_CONFIG"
+          REMAINING_CONFIG="$DECODED_RHADS_CONFIG"
           while [[ -n "$REMAINING_CONFIG" ]]; do
             # Find the next separator
             if [[ "$REMAINING_CONFIG" == *"---CONFIG_SEPARATOR---"* ]]; then
@@ -213,7 +221,7 @@ spec:
           echo "Started $CONFIG_INDEX sub-pipelines for periodic testing"
         else
           echo "Processing single configuration..."
-          RHADS_CONFIG_CONTENT=$(echo "$RHADS_CONFIG")
+          RHADS_CONFIG_CONTENT=$(echo "$DECODED_RHADS_CONFIG")
           echo "Configuration:"
           echo "$RHADS_CONFIG_CONTENT"
           # Extract OCP versions from RHADS config
