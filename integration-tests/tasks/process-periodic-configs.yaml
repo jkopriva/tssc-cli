@@ -122,5 +122,8 @@ spec:
         echo "Final output:"
         cat "$OUTPUT_FILE"
         #cat "$OUTPUT_FILE" > "$(results.rhads-config.path)"
-        cat "$OUTPUT_FILE" | tee $(results.rhads-config.path)
+        #cat "$OUTPUT_FILE" | tee $(results.rhads-config.path)
         echo "Configuration processing completed successfully"
+        curl -o rhads-config https://raw.githubusercontent.com/redhat-appstudio/tssc-cli/refs/heads/main/integration-tests/config/rhads-config
+
+        cat rhads-config | tee $(results.rhads-config.path)
