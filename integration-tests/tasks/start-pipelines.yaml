@@ -174,8 +174,15 @@ spec:
           fi
           
           # Count configurations for informational purposes
-          CONFIG_COUNT=$(echo "$DECODED_RHADS_CONFIG" | grep -o -e "---CONFIG_SEPARATOR---" | wc -l)
-          CONFIG_COUNT=$((CONFIG_COUNT + 1))  # Add 1 because there's one more config than separators
+          if echo "$DECODED_RHADS_CONFIG" | grep -q "---CONFIG_SEPARATOR---"; then
+            SEPARATOR_COUNT=$(echo "$DECODED_RHADS_CONFIG" | grep -o -e "---CONFIG_SEPARATOR---" | wc -l)
+            echo "DEBUG: Found $SEPARATOR_COUNT separators using grep"
+          else
+            SEPARATOR_COUNT=0
+            echo "DEBUG: No separators found, setting SEPARATOR_COUNT=0"
+          fi
+          
+          CONFIG_COUNT=$((SEPARATOR_COUNT + 1))  # Add 1 because there's one more config than separators
           echo "Found $CONFIG_COUNT configurations to process"
           
           # Handle single configuration case more robustly
@@ -226,6 +233,7 @@ spec:
             fi
           else
             # Multiple configurations - use the existing separator-based logic
+            echo "DEBUG: CONFIG_COUNT is not 1, using multiple configuration logic"
             echo "Processing multiple configurations using separator logic..."
             # Create a pipeline for every RHADS config using pure bash string manipulation
             CONFIG_INDEX=0
