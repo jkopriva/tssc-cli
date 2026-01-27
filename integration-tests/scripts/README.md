@@ -70,22 +70,44 @@ export pipeline_config="tekton,jenkins"
 # Example: Configure pre-release subscription for RHDH
 export PRE_RELEASE="RHDH"
 
-# Example: Configure pre-release subscription for TAS (requires TAS_RELEASE_PATH)
+# Example: Configure pre-release subscription for TAS (auto-detect latest)
+export PRE_RELEASE="TAS"
+export GITHUB_TOKEN="ghp_xxxxx"  # Required for auto-detection or private repos
+
+# Example: Configure pre-release subscription for TAS (specific version)
+export PRE_RELEASE="TAS"
+export TAS_VERSION="1.3.1"
+export GITHUB_TOKEN="ghp_xxxxx"
+
+# Example: Configure pre-release subscription for TAS (specific path)
 export PRE_RELEASE="TAS"
 export TAS_RELEASE_PATH="https://github.com/securesign/releases/blob/release-1.3.1/1.3.1/stable"
-# For private repositories, also set GITHUB_TOKEN (or it will use GITOPS_GIT_TOKEN if available)
-export GITHUB_TOKEN="ghp_xxxxx"
+export GITHUB_TOKEN="ghp_xxxxx"  # Required for private repositories
+
+# Example: Configure pre-release subscription for TPA
+export PRE_RELEASE="TPA"
+export GITHUB_TOKEN="ghp_xxxxx"  # Optional, for private repositories
 ```
 
 **Options**: `RHDH`, `TPA`, `TAS` (single value only)
 - `RHDH`: Configures pre-release subscription for Red Hat Developer Hub
-- `TPA`: Configures pre-release subscription for Trusted Profile Analyzer (not yet supported in pre-release.sh)
+  - Uses the latest release automatically via the RHDH install script
+- `TPA`: Configures pre-release subscription for Trusted Profile Analyzer
+  - Automatically configures ImageDigestMirrorSet, CatalogSource, and Subscription
+  - Uses channel `stable-v1.1` and version `1.1.0`
 - `TAS`: Configures pre-release subscription for Trusted Artifact Signer
-  - **Required**: When using `TAS`, you must also set `TAS_RELEASE_PATH` to the GitHub release path containing the TAS installation files
-  - Example: `export TAS_RELEASE_PATH="https://github.com/securesign/releases/blob/release-1.3.1/1.3.1/stable"`
-  - **For private repositories**: Set `GITHUB_TOKEN` environment variable with a GitHub personal access token. If not set, it will try to use `GITOPS_GIT_TOKEN` as a fallback.
+  - **Option 1 (Recommended)**: Auto-detect latest release
+    - Set `GITHUB_TOKEN` (or `GITOPS_GIT_TOKEN` as fallback)
+    - The script will automatically fetch the latest release from GitHub
+  - **Option 2**: Specify a version
+    - Set `TAS_VERSION` (e.g., `1.3.1`) and `GITHUB_TOKEN`
+    - The script will fetch the release matching that version
+  - **Option 3**: Use a specific path
+    - Set `TAS_RELEASE_PATH` to the GitHub release path
+    - Example: `export TAS_RELEASE_PATH="https://github.com/securesign/releases/blob/release-1.3.1/1.3.1/stable"`
+    - **For private repositories**: Set `GITHUB_TOKEN` environment variable. If not set, it will try to use `GITOPS_GIT_TOKEN` as a fallback.
 
-**Note**: This parameter is optional. If not set, the pre-release configuration step will be skipped. When set, the script will run `hack/pre-release.sh` to configure the subscription channels and sources for the specified product before creating the cluster configuration.
+**Note**: This parameter is optional. If not set, the pre-release configuration step will be skipped. When set, the script will run `hack/pre-release/pre-release.sh` which dispatches to product-specific scripts (`pre-release-rhdh.sh`, `pre-release-tas.sh`, `pre-release-tpa.sh`) to configure the subscription channels and sources for the specified product before creating the cluster configuration.
 
 
 Note: 
