@@ -6,7 +6,7 @@ set -o pipefail
 
 # Source common functions
 SCRIPT_DIR="$(
-    cd "$(dirname "$0")" >/dev/null
+    cd "$(dirname "$0")" >/dev/null || exit
     pwd
 )"
 # shellcheck source=hack/pre-release/pre-release-common.sh
@@ -91,13 +91,12 @@ fetch_latest_rhdh_release() {
     
     local response
     local curl_status
-    response=$(curl "${curl_args[@]}" "$api_url" 2>&1)
-    curl_status=$?
-    
-    if [[ $curl_status -ne 0 ]]; then
+    if ! response=$(curl "${curl_args[@]}" "$api_url" 2>&1); then
+        curl_status=$?
         echo "[WARNING] Failed to fetch latest release from GitHub API, install script will use --latest flag" >&2
         return 0
     fi
+    curl_status=0
     
     # Extract the tag_name from the latest release response
     local latest_tag

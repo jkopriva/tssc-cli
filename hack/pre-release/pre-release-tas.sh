@@ -6,7 +6,7 @@ set -o pipefail
 
 # Source common functions
 SCRIPT_DIR="$(
-    cd "$(dirname "$0")" >/dev/null
+    cd "$(dirname "$0")" >/dev/null || exit
     pwd
 )"
 # shellcheck source=hack/pre-release/pre-release-common.sh
@@ -520,7 +520,7 @@ configure_tas() {
     config_file="$PROJECT_DIR/installer/config.yaml"
     if [[ -f "$config_file" ]]; then
         echo "[INFO] Updating config.yaml to disable TAS subscription management" >&2
-        yq -i '.tssc.products[] |= select(.name == "Trusted Artifact Signer").properties.manageSubscription = false' "$config_file"
+        yq -i '.tssc.products[] |= (select(.name == "Trusted Artifact Signer") | .properties.manageSubscription = false)' "$config_file"
         echo "[INFO] ✓ TAS subscription management disabled in config.yaml" >&2
     else
         echo "[WARNING] config.yaml not found at $config_file, skipping subscription management update" >&2

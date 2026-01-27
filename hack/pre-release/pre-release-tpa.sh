@@ -6,7 +6,7 @@ set -o pipefail
 
 # Source common functions
 SCRIPT_DIR="$(
-    cd "$(dirname "$0")" >/dev/null
+    cd "$(dirname "$0")" >/dev/null || exit
     pwd
 )"
 # shellcheck source=hack/pre-release/pre-release-common.sh
@@ -42,6 +42,7 @@ parse_args() {
                 exit 1
             fi
             GITHUB_TOKEN="$2"
+            export GITHUB_TOKEN
             shift
             ;;
         -d|--debug)
@@ -242,7 +243,7 @@ EOF
     config_file="$PROJECT_DIR/installer/config.yaml"
     if [[ -f "$config_file" ]]; then
         echo "[INFO] Updating config.yaml to disable TPA subscription management" >&2
-        yq -i '.tssc.products[] |= select(.name == "Trusted Profile Analyzer").properties.manageSubscription = false' "$config_file"
+        yq -i '.tssc.products[] |= (select(.name == "Trusted Profile Analyzer") | .properties.manageSubscription = false)' "$config_file"
         echo "[INFO] ✓ TPA subscription management disabled in config.yaml" >&2
     else
         echo "[WARNING] config.yaml not found at $config_file, skipping subscription management update" >&2

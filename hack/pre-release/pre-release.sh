@@ -5,7 +5,7 @@ set -o nounset
 set -o pipefail
 
 SCRIPT_DIR="$(
-    cd "$(dirname "$0")" >/dev/null
+    cd "$(dirname "$0")" >/dev/null || exit
     pwd
 )"
 
@@ -133,7 +133,7 @@ parse_args() {
             ;;
         -h|--help)
             usage
-            exit 1
+            exit 0
             ;;
         *)
             echo "[ERROR] Unknown argument: $1" >&2

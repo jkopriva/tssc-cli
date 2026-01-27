@@ -72,17 +72,17 @@ export PRE_RELEASE="RHDH"
 
 # Example: Configure pre-release subscription for TAS (auto-detect latest)
 export PRE_RELEASE="TAS"
-export GITHUB_TOKEN="ghp_xxxxx"  # Required for auto-detection or private repos
+export GITHUB_TOKEN="ghp_xxxxx"  # Required for private repos, recommended for public repos to avoid rate limits
 
 # Example: Configure pre-release subscription for TAS (specific version)
 export PRE_RELEASE="TAS"
 export TAS_VERSION="1.3.1"
-export GITHUB_TOKEN="ghp_xxxxx"
+export GITHUB_TOKEN="ghp_xxxxx"  # Required for private repos, recommended for public repos to avoid rate limits
 
-# Example: Configure pre-release subscription for TAS (specific path)
+# Example: Configure pre-release subscription for TAS (specific path - private repo)
 export PRE_RELEASE="TAS"
 export TAS_RELEASE_PATH="https://github.com/securesign/releases/blob/release-1.3.1/1.3.1/stable"
-export GITHUB_TOKEN="ghp_xxxxx"  # Required for private repositories
+export GITHUB_TOKEN="ghp_xxxxx"  # Required for private repositories (or use GITOPS_GIT_TOKEN as fallback)
 
 # Example: Configure pre-release subscription for TPA
 export PRE_RELEASE="TPA"
@@ -98,14 +98,19 @@ export GITHUB_TOKEN="ghp_xxxxx"  # Optional, for private repositories
 - `TAS`: Configures pre-release subscription for Trusted Artifact Signer
   - **Option 1 (Recommended)**: Auto-detect latest release
     - Set `GITHUB_TOKEN` (or `GITOPS_GIT_TOKEN` as fallback)
+    - Required for private repositories
+    - Recommended for public repositories to avoid GitHub API rate limits
     - The script will automatically fetch the latest release from GitHub
   - **Option 2**: Specify a version
-    - Set `TAS_VERSION` (e.g., `1.3.1`) and `GITHUB_TOKEN`
+    - Set `TAS_VERSION` (e.g., `1.3.1`)
+    - `GITHUB_TOKEN` (or `GITOPS_GIT_TOKEN` as fallback) is required for private repositories
+    - Recommended for public repositories to avoid GitHub API rate limits
     - The script will fetch the release matching that version
   - **Option 3**: Use a specific path
     - Set `TAS_RELEASE_PATH` to the GitHub release path
     - Example: `export TAS_RELEASE_PATH="https://github.com/securesign/releases/blob/release-1.3.1/1.3.1/stable"`
-    - **For private repositories**: Set `GITHUB_TOKEN` environment variable. If not set, it will try to use `GITOPS_GIT_TOKEN` as a fallback.
+    - For private repositories: `GITHUB_TOKEN` (or `GITOPS_GIT_TOKEN` as fallback) is required
+    - For public repositories: `GITHUB_TOKEN` is not strictly required but recommended to avoid rate limits
 
 **Note**: This parameter is optional. If not set, the pre-release configuration step will be skipped. When set, the script will run `hack/pre-release/pre-release.sh` which dispatches to product-specific scripts (`pre-release-rhdh.sh`, `pre-release-tas.sh`, `pre-release-tpa.sh`) to configure the subscription channels and sources for the specified product before creating the cluster configuration.
 
