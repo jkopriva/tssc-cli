@@ -90,13 +90,10 @@ fetch_latest_rhdh_release() {
     curl_args+=(-H "Accept: application/vnd.github.v3+json")
     
     local response
-    local curl_status
     if ! response=$(curl "${curl_args[@]}" "$api_url" 2>&1); then
-        curl_status=$?
         echo "[WARNING] Failed to fetch latest release from GitHub API, install script will use --latest flag" >&2
         return 0
     fi
-    curl_status=0
     
     # Extract the tag_name from the latest release response
     local latest_tag
