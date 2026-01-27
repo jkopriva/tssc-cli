@@ -3,12 +3,12 @@
 
 # Initialize script and project directories
 SCRIPT_DIR="$(
-    cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null
+    cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null || exit
     pwd
 )"
 
 PROJECT_DIR="$(
-    cd "$SCRIPT_DIR/../.." >/dev/null
+    cd "$SCRIPT_DIR/../.." >/dev/null || exit
     pwd
 )"
 

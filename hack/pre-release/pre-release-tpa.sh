@@ -71,6 +71,8 @@ parse_args() {
 # 3. Use a fixed digest if it's stable across releases
 # For now, we use the fixed digest: 5d1f0a545dc1a85dad8349c0aa5369384a5aa9d0
 get_latest_tpa_image_digest() {
+    # shellcheck disable=SC2034
+    # ocp_version parameter is reserved for future use when implementing digest lookup
     local ocp_version=$1
     # TODO: Implement logic to fetch latest digest from Quay.io or GitHub
     # For now, return the known digest
