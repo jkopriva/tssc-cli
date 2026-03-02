@@ -29,10 +29,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Overlay: local (cwd) first, then embedded tarball. So when run from a repo
-	// (e.g. CI after pre-release), updated installer files (e.g. values.yaml) are
-	// used without rebuilding the binary.
-	ofs := chartfs.NewOverlayFS(os.DirFS(cwd), tfs)
+	// Create overlay filesystem with embedded tarball (already contains installer
+	// directory contents at root) and local filesystem rooted at cwd.
+	ofs := chartfs.NewOverlayFS(tfs, os.DirFS(cwd))
 	cfs := chartfs.New(ofs)
 
 	// Create TSSC-specific application context (metadata/configuration).
