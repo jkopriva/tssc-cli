@@ -396,8 +396,8 @@ github.com/quay/claircore/pkg/tarfs
 # github.com/rivo/uniseg v0.4.7
 ## explicit; go 1.18
 github.com/rivo/uniseg
-# github.com/rogpeppe/go-internal v1.14.1
-## explicit; go 1.23
+# github.com/rogpeppe/go-internal v1.15.0
+## explicit; go 1.25
 # github.com/rubenv/sql-migrate v1.8.0
 ## explicit; go 1.23.0
 github.com/rubenv/sql-migrate
