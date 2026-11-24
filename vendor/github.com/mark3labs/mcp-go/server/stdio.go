@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -33,6 +34,7 @@ type StdioServer struct {
 	// Thread-safe tool call processing
 	toolCallQueue  chan *toolCallWork
 	workerWg       sync.WaitGroup
+	requestWg      sync.WaitGroup // Tracks in-flight request handlers
 	workerPoolSize int
 	queueSize      int
 	writeMu        sync.Mutex // Protects concurrent writes
@@ -41,8 +43,10 @@ type StdioServer struct {
 // toolCallWork represents a queued tool call request
 type toolCallWork struct {
 	ctx     context.Context
+	id      any // JSON-RPC id, so a recovered panic stays correlatable
 	message json.RawMessage
 	writer  io.Writer
+	finish  func()
 }
 
 // StdioOption defines a function type for configuring StdioServer
@@ -92,21 +96,35 @@ func WithQueueSize(size int) StdioOption {
 
 // stdioSession is a static client session, since stdio has only one client.
 type stdioSession struct {
-	notifications      chan mcp.JSONRPCNotification
-	initialized        atomic.Bool
-	loggingLevel       atomic.Value
-	clientInfo         atomic.Value                     // stores session-specific client info
-	clientCapabilities atomic.Value                     // stores session-specific client capabilities
-	writer             io.Writer                        // for sending requests to client
-	requestID          atomic.Int64                     // for generating unique request IDs
-	mu                 sync.RWMutex                     // protects writer
-	pendingRequests    map[int64]chan *samplingResponse // for tracking pending sampling requests
-	pendingMu          sync.RWMutex                     // protects pendingRequests
+	clientInfoStore // provides Get/SetClientInfo and Get/SetClientCapabilities via method promotion
+
+	notifications       chan mcp.JSONRPCNotification
+	initialized         atomic.Bool
+	loggingLevel        atomic.Value
+	writer              io.Writer                           // for sending requests to client
+	requestID           atomic.Int64                        // for generating unique request IDs
+	mu                  sync.RWMutex                        // protects writer
+	pendingRequests     map[int64]chan *samplingResponse    // for tracking pending sampling requests
+	pendingElicitations map[int64]chan *elicitationResponse // for tracking pending elicitation requests
+	pendingRoots        map[int64]chan *rootsResponse       // for tracking pending list roots requests
+	pendingMu           sync.RWMutex                        // protects pendingRequests and pendingElicitations
 }
 
 // samplingResponse represents a response to a sampling request
 type samplingResponse struct {
 	result *mcp.CreateMessageResult
+	err    error
+}
+
+// elicitationResponse represents a response to an elicitation request
+type elicitationResponse struct {
+	result *mcp.ElicitationResult
+	err    error
+}
+
+// rootsResponse represents a response to an list root request
+type rootsResponse struct {
+	result *mcp.ListRootsResult
 	err    error
 }
 
@@ -126,32 +144,6 @@ func (s *stdioSession) Initialize() {
 
 func (s *stdioSession) Initialized() bool {
 	return s.initialized.Load()
-}
-
-func (s *stdioSession) GetClientInfo() mcp.Implementation {
-	if value := s.clientInfo.Load(); value != nil {
-		if clientInfo, ok := value.(mcp.Implementation); ok {
-			return clientInfo
-		}
-	}
-	return mcp.Implementation{}
-}
-
-func (s *stdioSession) SetClientInfo(clientInfo mcp.Implementation) {
-	s.clientInfo.Store(clientInfo)
-}
-
-func (s *stdioSession) GetClientCapabilities() mcp.ClientCapabilities {
-	if value := s.clientCapabilities.Load(); value != nil {
-		if clientCapabilities, ok := value.(mcp.ClientCapabilities); ok {
-			return clientCapabilities
-		}
-	}
-	return mcp.ClientCapabilities{}
-}
-
-func (s *stdioSession) SetClientCapabilities(clientCapabilities mcp.ClientCapabilities) {
-	s.clientCapabilities.Store(clientCapabilities)
 }
 
 func (s *stdioSession) SetLogLevel(level mcp.LoggingLevel) {
@@ -229,6 +221,130 @@ func (s *stdioSession) RequestSampling(ctx context.Context, request mcp.CreateMe
 	}
 }
 
+// ListRoots sends an list roots request to the client and waits for the response.
+func (s *stdioSession) ListRoots(ctx context.Context, request mcp.ListRootsRequest) (*mcp.ListRootsResult, error) {
+	s.mu.RLock()
+	writer := s.writer
+	s.mu.RUnlock()
+
+	if writer == nil {
+		return nil, fmt.Errorf("no writer available for sending requests")
+	}
+
+	// Generate a unique request ID
+	id := s.requestID.Add(1)
+
+	// Create a response channel for this request
+	responseChan := make(chan *rootsResponse, 1)
+	s.pendingMu.Lock()
+	s.pendingRoots[id] = responseChan
+	s.pendingMu.Unlock()
+
+	// Cleanup function to remove the pending request
+	cleanup := func() {
+		s.pendingMu.Lock()
+		delete(s.pendingRoots, id)
+		s.pendingMu.Unlock()
+	}
+	defer cleanup()
+
+	// Create the JSON-RPC request
+	jsonRPCRequest := struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int64  `json:"id"`
+		Method  string `json:"method"`
+	}{
+		JSONRPC: mcp.JSONRPC_VERSION,
+		ID:      id,
+		Method:  string(mcp.MethodListRoots),
+	}
+
+	// Marshal and send the request
+	requestBytes, err := json.Marshal(jsonRPCRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal list roots request: %w", err)
+	}
+	requestBytes = append(requestBytes, '\n')
+
+	if _, err := writer.Write(requestBytes); err != nil {
+		return nil, fmt.Errorf("failed to write list roots request: %w", err)
+	}
+
+	// Wait for the response or context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case response := <-responseChan:
+		if response.err != nil {
+			return nil, response.err
+		}
+		return response.result, nil
+	}
+}
+
+// RequestElicitation sends an elicitation request to the client and waits for the response.
+func (s *stdioSession) RequestElicitation(ctx context.Context, request mcp.ElicitationRequest) (*mcp.ElicitationResult, error) {
+	s.mu.RLock()
+	writer := s.writer
+	s.mu.RUnlock()
+
+	if writer == nil {
+		return nil, fmt.Errorf("no writer available for sending requests")
+	}
+
+	// Generate a unique request ID
+	id := s.requestID.Add(1)
+
+	// Create a response channel for this request
+	responseChan := make(chan *elicitationResponse, 1)
+	s.pendingMu.Lock()
+	s.pendingElicitations[id] = responseChan
+	s.pendingMu.Unlock()
+
+	// Cleanup function to remove the pending request
+	cleanup := func() {
+		s.pendingMu.Lock()
+		delete(s.pendingElicitations, id)
+		s.pendingMu.Unlock()
+	}
+	defer cleanup()
+
+	// Create the JSON-RPC request
+	jsonRPCRequest := struct {
+		JSONRPC string                `json:"jsonrpc"`
+		ID      int64                 `json:"id"`
+		Method  string                `json:"method"`
+		Params  mcp.ElicitationParams `json:"params"`
+	}{
+		JSONRPC: mcp.JSONRPC_VERSION,
+		ID:      id,
+		Method:  string(mcp.MethodElicitationCreate),
+		Params:  request.Params,
+	}
+
+	// Marshal and send the request
+	requestBytes, err := json.Marshal(jsonRPCRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal elicitation request: %w", err)
+	}
+	requestBytes = append(requestBytes, '\n')
+
+	if _, err := writer.Write(requestBytes); err != nil {
+		return nil, fmt.Errorf("failed to write elicitation request: %w", err)
+	}
+
+	// Wait for the response or context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case response := <-responseChan:
+		if response.err != nil {
+			return nil, response.err
+		}
+		return response.result, nil
+	}
+}
+
 // SetWriter sets the writer for sending requests to the client.
 func (s *stdioSession) SetWriter(writer io.Writer) {
 	s.mu.Lock()
@@ -237,15 +353,19 @@ func (s *stdioSession) SetWriter(writer io.Writer) {
 }
 
 var (
-	_ ClientSession         = (*stdioSession)(nil)
-	_ SessionWithLogging    = (*stdioSession)(nil)
-	_ SessionWithClientInfo = (*stdioSession)(nil)
-	_ SessionWithSampling   = (*stdioSession)(nil)
+	_ ClientSession          = (*stdioSession)(nil)
+	_ SessionWithLogging     = (*stdioSession)(nil)
+	_ SessionWithClientInfo  = (*stdioSession)(nil)
+	_ SessionWithSampling    = (*stdioSession)(nil)
+	_ SessionWithElicitation = (*stdioSession)(nil)
+	_ SessionWithRoots       = (*stdioSession)(nil)
 )
 
 var stdioSessionInstance = stdioSession{
-	notifications:   make(chan mcp.JSONRPCNotification, 100),
-	pendingRequests: make(map[int64]chan *samplingResponse),
+	notifications:       make(chan mcp.JSONRPCNotification, 100),
+	pendingRequests:     make(map[int64]chan *samplingResponse),
+	pendingElicitations: make(map[int64]chan *elicitationResponse),
+	pendingRoots:        make(map[int64]chan *rootsResponse),
 }
 
 // NewStdioServer creates a new stdio server wrapper around an MCPServer.
@@ -307,6 +427,13 @@ func (s *StdioServer) processInputStream(ctx context.Context, reader *bufio.Read
 		line, err := s.readNextLine(ctx, reader)
 		if err != nil {
 			if err == io.EOF {
+				// The final message may arrive without a trailing newline.
+				if strings.TrimSpace(line) != "" {
+					if err := s.processMessage(ctx, line, stdout); err != nil && err != io.EOF {
+						s.errLogger.Printf("Error handling message: %v", err)
+						return err
+					}
+				}
 				return nil
 			}
 			s.errLogger.Printf("Error reading input: %v", err)
@@ -323,26 +450,18 @@ func (s *StdioServer) processInputStream(ctx context.Context, reader *bufio.Read
 	}
 }
 
-// toolCallWorker processes tool calls from the queue
-func (s *StdioServer) toolCallWorker(ctx context.Context) {
+// toolCallWorker processes tool calls from the queue until Listen closes it.
+//
+// It does not stop on context cancellation: Listen cancels the request
+// context when input ends and only then closes the queue, so a worker that
+// returned on ctx.Done() could leave accepted calls unanswered. Calls still
+// queued at that point run with the cancelled context and get a response.
+func (s *StdioServer) toolCallWorker() {
 	defer s.workerWg.Done()
 
-	for {
-		select {
-		case work, ok := <-s.toolCallQueue:
-			if !ok {
-				// Channel closed, exit worker
-				return
-			}
-			// Process the tool call
-			response := s.server.HandleMessage(work.ctx, work.message)
-			if response != nil {
-				if err := s.writeResponse(response, work.writer); err != nil {
-					s.errLogger.Printf("Error writing tool response: %v", err)
-				}
-			}
-		case <-ctx.Done():
-			return
+	for work := range s.toolCallQueue {
+		if err := s.handleRequest(work.ctx, work.id, work.message, work.writer, work.finish); err != nil {
+			s.errLogger.Printf("Error writing tool response: %v", err)
 		}
 	}
 }
@@ -392,19 +511,25 @@ func (s *StdioServer) Listen(
 	ctx = s.server.WithContext(ctx, &stdioSessionInstance)
 
 	// Set the writer for sending requests to the client
-	stdioSessionInstance.SetWriter(stdout)
+	stdioSessionInstance.SetWriter(&lockedWriter{mu: &s.writeMu, w: stdout})
 
 	// Add in any custom context.
 	if s.contextFunc != nil {
 		ctx = s.contextFunc(ctx)
 	}
 
+	// Requests are served on their own goroutines. Cancelling this context when
+	// input processing ends releases any handler still blocked on it, so none
+	// outlives the session it was registered against.
+	ctx, cancelRequests := context.WithCancel(ctx)
+	defer cancelRequests()
+
 	reader := bufio.NewReader(stdin)
 
 	// Start worker pool for tool calls
 	for i := 0; i < s.workerPoolSize; i++ {
 		s.workerWg.Add(1)
-		go s.toolCallWorker(ctx)
+		go s.toolCallWorker()
 	}
 
 	// Start notification handler
@@ -414,8 +539,10 @@ func (s *StdioServer) Listen(
 	err := s.processInputStream(ctx, reader, stdout)
 
 	// Shutdown workers gracefully
+	cancelRequests()
 	close(s.toolCallQueue)
 	s.workerWg.Wait()
+	s.requestWg.Wait()
 
 	return err
 }
@@ -445,34 +572,80 @@ func (s *StdioServer) processMessage(
 		return nil
 	}
 
-	// Check if this is a tool call that might need sampling (and thus should be processed concurrently)
-	var baseMessage struct {
-		Method string `json:"method"`
-	}
-	if json.Unmarshal(rawMessage, &baseMessage) == nil && baseMessage.Method == "tools/call" {
-		// Queue tool calls for processing by workers
-		select {
-		case s.toolCallQueue <- &toolCallWork{
-			ctx:     ctx,
-			message: rawMessage,
-			writer:  writer,
-		}:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			// Queue is full, process synchronously as fallback
-			s.errLogger.Printf("Tool call queue full, processing synchronously")
-			response := s.server.HandleMessage(ctx, rawMessage)
-			if response != nil {
-				return s.writeResponse(response, writer)
-			}
-			return nil
-		}
+	// Check if this is a response to an elicitation request
+	if s.handleElicitationResponse(rawMessage) {
+		return nil
 	}
 
-	// Handle other messages synchronously
-	response := s.server.HandleMessage(ctx, rawMessage)
+	// Check if this is a response to an list roots request
+	if s.handleListRootsResponse(rawMessage) {
+		return nil
+	}
+
+	// Check if this is a tool call that might need sampling (and thus should be processed concurrently)
+	var baseMessage struct {
+		Method string        `json:"method"`
+		ID     mcp.RequestId `json:"id"`
+	}
+	parsed := json.Unmarshal(rawMessage, &baseMessage) == nil
+	if !parsed {
+		var invalidIDMessage struct {
+			Method string          `json:"method"`
+			ID     json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(rawMessage, &invalidIDMessage); err == nil && invalidIDMessage.Method == string(mcp.MethodToolsCall) {
+			var id mcp.RequestId
+			if err := json.Unmarshal(invalidIDMessage.ID, &id); err != nil {
+				return s.writeResponse(createErrorResponse(nil, mcp.INVALID_REQUEST, "Invalid request id"), writer)
+			}
+		}
+	}
+	if parsed && !baseMessage.ID.IsNil() {
+		// Register before handing the request off, so even queued calls
+		// can receive cancellation notifications.
+		id := baseMessage.ID.Value()
+		reqCtx, finish := s.server.startRequest(ctx, inflightKey(ctx, id))
+		if finish == nil {
+			// Keep reading cancellation notifications and EOF if stdout blocks.
+			s.requestWg.Go(func() {
+				if err := s.writeResponse(duplicateRequestIDError(), writer); err != nil {
+					s.errLogger.Printf("Error writing duplicate request response: %v", err)
+				}
+			})
+			return nil
+		}
+		if baseMessage.Method == string(mcp.MethodToolsCall) {
+			select {
+			case s.toolCallQueue <- &toolCallWork{
+				ctx:     reqCtx,
+				id:      id,
+				message: rawMessage,
+				writer:  writer,
+				finish:  finish,
+			}:
+				return nil
+			case <-ctx.Done():
+				finish()
+				return ctx.Err()
+			default:
+				// Queue is full, process synchronously as fallback.
+				s.errLogger.Printf("Tool call queue full, processing synchronously")
+				return s.handleRequest(reqCtx, id, rawMessage, writer, finish)
+			}
+		}
+
+		// A blocking handler such as subscriptions/listen must not stall
+		// the read loop.
+		s.requestWg.Go(func() {
+			if err := s.handleRequest(reqCtx, id, rawMessage, writer, finish); err != nil {
+				s.errLogger.Printf("Error writing request response: %v", err)
+			}
+		})
+		return nil
+	}
+
+	// Notifications carry no response and must not queue behind a request.
+	response := s.handleMessage(ctx, baseMessage.ID.Value(), rawMessage, nil)
 
 	// Only write response if there is one (not for notifications)
 	if response != nil {
@@ -482,6 +655,34 @@ func (s *StdioServer) processMessage(
 	}
 
 	return nil
+}
+
+// handleMessage dispatches a message, recovering a panicking handler so that
+// it can't end the process. A request gets an INTERNAL_ERROR response
+// carrying its id; a notification (nil id) gets no response at all.
+func (s *StdioServer) handleMessage(ctx context.Context, id any, rawMessage json.RawMessage, finish func()) (response mcp.JSONRPCMessage) {
+	if finish != nil {
+		defer finish()
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.errLogger.Printf("panic recovered in stdio message handler: %v", r)
+			if id != nil {
+				response = createErrorResponse(id, mcp.INTERNAL_ERROR, fmt.Sprintf("internal panic: %v", r))
+			}
+		}
+	}()
+	return s.server.handleMessage(ctx, rawMessage, finish != nil)
+}
+
+// handleRequest serves one JSON-RPC request and writes its response. id is the
+// request's JSON-RPC id, so a recovered panic stays correlatable by the client.
+func (s *StdioServer) handleRequest(ctx context.Context, id any, rawMessage json.RawMessage, writer io.Writer, finish func()) error {
+	response := s.handleMessage(ctx, id, rawMessage, finish)
+	if response == nil {
+		return nil
+	}
+	return s.writeResponse(response, writer)
 }
 
 // handleSamplingResponse checks if the message is a response to a sampling request
@@ -529,13 +730,142 @@ func (s *stdioSession) handleSamplingResponse(rawMessage json.RawMessage) bool {
 		if err := json.Unmarshal(response.Result, &result); err != nil {
 			samplingResp.err = fmt.Errorf("failed to unmarshal sampling response: %w", err)
 		} else {
-			samplingResp.result = &result
+			// Parse content from map[string]any to proper Content type (TextContent, ImageContent, AudioContent)
+			content, err := mcp.ParseSamplingContent(result.Content)
+			if err != nil {
+				samplingResp.err = fmt.Errorf("failed to parse sampling response content: %w", err)
+			} else {
+				result.Content = content
+				samplingResp.result = &result
+			}
 		}
 	}
 
 	// Send the response (non-blocking)
 	select {
 	case responseChan <- samplingResp:
+	default:
+		// Channel is full or closed, ignore
+	}
+
+	return true
+}
+
+// handleElicitationResponse checks if the message is a response to an elicitation request
+// and routes it to the appropriate pending request channel.
+func (s *StdioServer) handleElicitationResponse(rawMessage json.RawMessage) bool {
+	return stdioSessionInstance.handleElicitationResponse(rawMessage)
+}
+
+// handleElicitationResponse handles incoming elicitation responses for this session
+func (s *stdioSession) handleElicitationResponse(rawMessage json.RawMessage) bool {
+	// Try to parse as a JSON-RPC response
+	var response struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.Number     `json:"id"`
+		Result  json.RawMessage `json:"result,omitempty"`
+		Error   *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &response); err != nil {
+		return false
+	}
+	// Parse the ID as int64
+	id, err := response.ID.Int64()
+	if err != nil || (response.Result == nil && response.Error == nil) {
+		return false
+	}
+
+	// Check if we have a pending elicitation request with this ID
+	s.pendingMu.RLock()
+	responseChan, exists := s.pendingElicitations[id]
+	s.pendingMu.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	// Parse and send the response
+	elicitationResp := &elicitationResponse{}
+
+	if response.Error != nil {
+		elicitationResp.err = fmt.Errorf("elicitation request failed: %s", response.Error.Message)
+	} else {
+		var result mcp.ElicitationResult
+		if err := json.Unmarshal(response.Result, &result); err != nil {
+			elicitationResp.err = fmt.Errorf("failed to unmarshal elicitation response: %w", err)
+		} else {
+			elicitationResp.result = &result
+		}
+	}
+
+	// Send the response (non-blocking)
+	select {
+	case responseChan <- elicitationResp:
+	default:
+		// Channel is full or closed, ignore
+	}
+
+	return true
+}
+
+// handleListRootsResponse checks if the message is a response to an list roots request
+// and routes it to the appropriate pending request channel.
+func (s *StdioServer) handleListRootsResponse(rawMessage json.RawMessage) bool {
+	return stdioSessionInstance.handleListRootsResponse(rawMessage)
+}
+
+// handleListRootsResponse handles incoming list root responses for this session
+func (s *stdioSession) handleListRootsResponse(rawMessage json.RawMessage) bool {
+	// Try to parse as a JSON-RPC response
+	var response struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.Number     `json:"id"`
+		Result  json.RawMessage `json:"result,omitempty"`
+		Error   *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &response); err != nil {
+		return false
+	}
+	// Parse the ID as int64
+	id, err := response.ID.Int64()
+	if err != nil || (response.Result == nil && response.Error == nil) {
+		return false
+	}
+
+	// Check if we have a pending list root request with this ID
+	s.pendingMu.RLock()
+	responseChan, exists := s.pendingRoots[id]
+	s.pendingMu.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	// Parse and send the response
+	rootsResp := &rootsResponse{}
+
+	if response.Error != nil {
+		rootsResp.err = fmt.Errorf("list root request failed: %s", response.Error.Message)
+	} else {
+		var result mcp.ListRootsResult
+		if err := json.Unmarshal(response.Result, &result); err != nil {
+			rootsResp.err = fmt.Errorf("failed to unmarshal list root response: %w", err)
+		} else {
+			rootsResp.result = &result
+		}
+	}
+
+	// Send the response (non-blocking)
+	select {
+	case responseChan <- rootsResp:
 	default:
 		// Channel is full or closed, ignore
 	}
@@ -564,6 +894,20 @@ func (s *StdioServer) writeResponse(
 	}
 
 	return nil
+}
+
+// lockedWriter writes to w while holding mu. The stdio session sends its
+// requests to the client through it, so they take the same lock as the
+// server's responses and notifications.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
 }
 
 // ServeStdio is a convenience function that creates and starts a StdioServer with os.Stdin and os.Stdout.
